@@ -1,0 +1,17 @@
+192.168.55.105
+systemctl --user status vino-server
+/usr/lib/vino/vino-server &
+pkill vino-server
+
+authhhhh
+
+gsettings set org.gnome.Vino enabled true
+gsettings set org.gnome.Vino prompt-enabled false
+gsettings set org.gnome.Vino require-encryption false
+gsettings set org.gnome.Vino authentication-methods "['vnc']"
+
+set pass
+
+gsettings set org.gnome.Vino vnc-password "$(echo -n 'sid12345' | base64)"
+
+
