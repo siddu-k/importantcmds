@@ -5,6 +5,10 @@ docker start oracle10g
 docker restart oracle10g
 
 
+sudo systemctl start docker
+
+docker start oracle10g
+
 docker exec -it oracle10g bash
 
 sqlplus system/oracle@localhost:1521/xe
