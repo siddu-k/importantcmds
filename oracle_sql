@@ -1,0 +1,25 @@
+http://localhost:49162/apex
+
+docker stop oracle10g
+docker start oracle10g
+docker restart oracle10g
+
+
+docker exec -it oracle10g bash
+
+sqlplus system/oracle@localhost:1521/xe
+
+sqlplus sys/oracle@localhost:1521/xe as sysdba
+
+
+Database Credentials:
+
+Username: system
+
+Password: oracle
+
+SID: xe
+
+Host: localhost
+
+Port: 1521
