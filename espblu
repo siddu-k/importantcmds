@@ -1,0 +1,127 @@
+
+#include <BLEDevice.h>
+#include <BLEServer.h>
+#include <BLEUtils.h>
+#include <BLE2902.h>
+#include <TinyGPS++.h>
+#include <HardwareSerial.h>// -------- CONFIGURATION --------
+#define DEVICE_NAME "ESP32_Safety_Watch"
+#define SERVICE_UUID        "00001234-0000-1000-8000-00805f9b34fb"
+#define CHARACTERISTIC_UUID "00005678-0000-1000-8000-00805f9b34fb"
+
+#define BUTTON_PIN 13 // Slide/Toggle Switch
+#define LED_PIN 5     
+#define GPS_RX 16
+#define GPS_TX 17
+
+// -------- OBJECTS --------
+BLECharacteristic *pCharacteristic;
+bool deviceConnected = false;
+TinyGPSPlus gps;
+HardwareSerial SerialGPS(2);
+
+// -------- VARIABLES --------
+bool lastReportedState = false; // false = 0, true = 1
+unsigned long lastBlinkTime = 0;
+bool ledState = false;
+unsigned long lastGpsSent = 0;
+
+// -------- BLE CALLBACK --------
+class MyServerCallbacks: public BLEServerCallbacks {
+  void onConnect(BLEServer* pServer) {
+    deviceConnected = true;
+    Serial.println("\n[BLE] ✅ Phone Connected");
+    
+    // IMPORTANT: Send current physical switch state immediately on connection
+    bool currentState = (digitalRead(BUTTON_PIN) == LOW);
+    pCharacteristic->setValue(currentState ? "1" : "0");
+    pCharacteristic->notify();
+    Serial.println(currentState ? "[BLE] Initial State: SOS ON" : "[BLE] Initial State: SOS OFF");
+  };
+
+  void onDisconnect(BLEServer* pServer) {
+    deviceConnected = false;
+    digitalWrite(LED_PIN, LOW);
+    Serial.println("\n[BLE] ❌ Phone Disconnected");
+    pServer->getAdvertising()->start();
+  }
+};
+
+void setup() {
+  Serial.begin(115200);
+  SerialGPS.begin(9600, SERIAL_8N1, GPS_RX, GPS_TX);
+  
+  pinMode(BUTTON_PIN, INPUT_PULLUP);
+  pinMode(LED_PIN, OUTPUT);
+  
+  BLEDevice::init(DEVICE_NAME);
+  BLEServer *pServer = BLEDevice::createServer();
+  pServer->setCallbacks(new MyServerCallbacks());
+
+  BLEService *pService = pServer->createService(SERVICE_UUID);
+  pCharacteristic = pService->createCharacteristic(
+                      CHARACTERISTIC_UUID,
+                      BLECharacteristic::PROPERTY_NOTIFY | BLECharacteristic::PROPERTY_READ
+                    );
+  pCharacteristic->addDescriptor(new BLE2902());
+  pService->start();
+
+  BLEAdvertising *pAdvertising = BLEDevice::getAdvertising();
+  pAdvertising->addServiceUUID(SERVICE_UUID);
+  pAdvertising->setScanResponse(true);
+  BLEDevice::startAdvertising();
+
+  // Set initial state
+  lastReportedState = (digitalRead(BUTTON_PIN) == LOW);
+
+  Serial.println("\n--- SWITCH MONITORING READY ---");
+}
+
+void loop() {
+  // 1. GPS Processing
+  while (SerialGPS.available() > 0) {
+    if (gps.encode(SerialGPS.read())) {
+      if (gps.location.isValid() && deviceConnected) {
+        if (millis() - lastGpsSent > 5000) {
+          String gpsData = "GPS:" + String(gps.location.lat(), 6) + "," + String(gps.location.lng(), 6);
+          pCharacteristic->setValue(gpsData.c_str());
+          pCharacteristic->notify();
+          lastGpsSent = millis();
+          Serial.println("[GPS] Sending: " + gpsData);
+        }
+      }
+    }
+  }
+
+  // 2. Direct Switch Position Mapping
+  bool currentSwitchIsOn = (digitalRead(BUTTON_PIN) == LOW);
+
+  // If the switch was moved
+  if (currentSwitchIsOn != lastReportedState) {
+    delay(50); // Debounce
+    if (digitalRead(BUTTON_PIN) == (currentSwitchIsOn ? LOW : HIGH)) {
+      if (deviceConnected) {
+        pCharacteristic->setValue(currentSwitchIsOn ? "1" : "0");
+        pCharacteristic->notify();
+        Serial.println(currentSwitchIsOn ? "[SW] Physical Switch -> ON (1)" : "[SW] Physical Switch -> OFF (0)");
+      }
+      lastReportedState = currentSwitchIsOn;
+    }
+  }
+
+  // 3. LED Logic
+  if (lastReportedState) {
+    // SOS BLINK (1s)
+    if (millis() - lastBlinkTime > 1000) {
+      ledState = !ledState;
+      digitalWrite(LED_PIN, ledState);
+      lastBlinkTime = millis();
+    }
+  } else if (deviceConnected) {
+    digitalWrite(LED_PIN, HIGH); // SOLID READY
+  } else {
+    digitalWrite(LED_PIN, LOW);
+  }
+
+  delay(10);
+}
